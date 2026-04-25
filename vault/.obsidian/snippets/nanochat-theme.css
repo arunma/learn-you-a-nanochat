@@ -1,0 +1,183 @@
+/* ═══════════════════════════════════════════════════════════════
+   nanochat Learning Vault — Custom Theme
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── COLOR PALETTE (CSS variables for reuse) ── */
+:root {
+  --nc-blue: #185fa5;       /* PyTorch built-ins */
+  --nc-blue-bg: #e6f1fb;
+  --nc-blue-bd: #b8d4ef;
+  --nc-green: #1d6b45;      /* nanochat custom code */
+  --nc-green-bg: #e1f5ee;
+  --nc-green-bd: #9fd8c4;
+  --nc-orange: #c8440a;     /* shapes / dimensions */
+  --nc-orange-bg: #fef0ec;
+  --nc-orange-bd: #f0b8a0;
+  --nc-purple: #6b3fa0;     /* Q/K/V / attention */
+  --nc-purple-bg: #f0effe;
+  --nc-purple-bd: #b0a8e8;
+  --nc-amber: #9a6800;      /* key insights */
+  --nc-amber-bg: #fef9e7;
+  --nc-amber-bd: #e8c84a;
+  --nc-ink: #1a1917;
+  --nc-ink2: #3a3830;
+  --nc-ink3: #6a6860;
+  --nc-paper: #faf8f5;
+  --nc-paper2: #f2efe9;
+  --nc-rule: #d8d3c8;
+}
+
+/* ── INLINE CODE BADGES — use with <code class="pt"> or <code class="nc"> ── */
+/* In Obsidian, use HTML: <span class="badge-pt">PT</span> */
+.badge-pt {
+  background: var(--nc-blue-bg);
+  color: var(--nc-blue);
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--nc-blue-bd);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+.badge-nc {
+  background: var(--nc-green-bg);
+  color: var(--nc-green);
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--nc-green-bd);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+.badge-shape {
+  background: var(--nc-orange-bg);
+  color: var(--nc-orange);
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--nc-orange-bd);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+.badge-new {
+  background: var(--nc-purple-bg);
+  color: var(--nc-purple);
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--nc-purple-bd);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+
+/* ── CUSTOM CALLOUT COLORS ── */
+/* Obsidian callouts: > [!pytorch], > [!nanochat], > [!shape], > [!keyinsight] */
+
+.callout[data-callout="pytorch"] {
+  --callout-color: 24, 95, 165;
+  --callout-icon: lucide-box;
+  background: var(--nc-blue-bg);
+  border-left: 4px solid var(--nc-blue);
+}
+.callout[data-callout="pytorch"] .callout-title {
+  color: var(--nc-blue);
+}
+
+.callout[data-callout="nanochat"] {
+  --callout-color: 29, 107, 69;
+  --callout-icon: lucide-code;
+  background: var(--nc-green-bg);
+  border-left: 4px solid var(--nc-green);
+}
+.callout[data-callout="nanochat"] .callout-title {
+  color: var(--nc-green);
+}
+
+.callout[data-callout="shape"] {
+  --callout-color: 200, 68, 10;
+  --callout-icon: lucide-box;
+  background: var(--nc-orange-bg);
+  border-left: 4px solid var(--nc-orange);
+}
+.callout[data-callout="shape"] .callout-title {
+  color: var(--nc-orange);
+}
+
+.callout[data-callout="keyinsight"] {
+  --callout-color: 154, 104, 0;
+  --callout-icon: lucide-star;
+  background: var(--nc-amber-bg);
+  border-left: 4px solid var(--nc-amber);
+}
+.callout[data-callout="keyinsight"] .callout-title {
+  color: var(--nc-amber);
+}
+
+.callout[data-callout="qkv"] {
+  --callout-color: 107, 63, 160;
+  --callout-icon: lucide-split;
+  background: var(--nc-purple-bg);
+  border-left: 4px solid var(--nc-purple);
+}
+.callout[data-callout="qkv"] .callout-title {
+  color: var(--nc-purple);
+}
+
+.callout[data-callout="versus"] {
+  --callout-color: 106, 104, 96;
+  --callout-icon: lucide-arrow-left-right;
+}
+
+.callout[data-callout="copywork"] {
+  --callout-color: 200, 68, 10;
+  --callout-icon: lucide-pencil;
+  background: #fff8f0;
+  border-left: 4px solid var(--nc-orange);
+}
+.callout[data-callout="copywork"] .callout-title {
+  color: var(--nc-orange);
+  font-weight: 700;
+}
+
+/* ── SHAPE TRACE TABLES ── */
+table {
+  font-size: 0.9em;
+}
+th {
+  text-transform: uppercase;
+  font-size: 0.78em;
+  letter-spacing: 0.05em;
+  color: var(--nc-ink3);
+}
+
+/* ── TAG PILLS — colorful tag styling ── */
+.tag[href="#tag/pt"] { background: var(--nc-blue-bg); color: var(--nc-blue); }
+.tag[href="#tag/nc"] { background: var(--nc-green-bg); color: var(--nc-green); }
+.tag[href="#tag/shape"] { background: var(--nc-orange-bg); color: var(--nc-orange); }
+.tag[href="#tag/attention"] { background: var(--nc-purple-bg); color: var(--nc-purple); }
+
+/* ── DIMENSION HIGHLIGHT in code blocks ── */
+/* Use HTML comments in code for emphasis */
+code {
+  font-size: 0.88em;
+}
+
+/* ── PHASE HEADERS ── */
+.phase-tag {
+  display: inline-block;
+  font-family: var(--font-monospace);
+  font-size: 0.68em;
+  font-weight: 700;
+  background: var(--nc-ink);
+  color: var(--nc-paper);
+  padding: 3px 10px;
+  border-radius: 3px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-right: 8px;
+  vertical-align: middle;
+}

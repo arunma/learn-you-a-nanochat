@@ -168,6 +168,59 @@ The embedding dimension — `C` in shape traces. Every token is represented as a
 
 ---
 
+## How GPTConfig flows into tensor shapes
+
+Every field in GPTConfig eventually determines a tensor dimension somewhere in the model. This trace shows where each config value lands:
+
+```
+CONFIG FIELD              WHERE IT BECOMES A SHAPE              TENSOR SHAPE
+─────────────────────────────────────────────────────────────────────────────
+
+EMBEDDING LAYER
+vocab_size = 32768        wte = nn.Embedding(V, C)              (32768, 768)
+n_embd = 768              ↑ rows = vocab_size, cols = n_embd
+                          lm_head = Linear(C, V)                (768, 32768)
+
+ATTENTION — Q PROJECTION
+n_embd = 768              c_q = Linear(C, n_head * d_h)         (768, 768)
+n_head = 6                ↑ output = 6 heads × 128 dims = 768
+                          .view(B, T, n_head, d_h)              (B, T, 6, 128)
+
+ATTENTION — K, V PROJECTIONS
+n_embd = 768              c_k = Linear(C, n_kv_head * d_h)      (768, 768)
+n_kv_head = 6             c_v = Linear(C, n_kv_head * d_h)      (768, 768)
+                          ↑ if n_kv_head < n_head, these shrink (GQA)
+
+ATTENTION — SCORE MATRIX
+sequence_len = 2048       q @ k.T → scores                      (B, 6, T, T)
+                          ↑ T × T = 2048 × 2048 = 4.2M scores per head
+                          ↑ × 6 heads = 25.2M scores per batch item
+
+MLP
+n_embd = 768              c_fc = Linear(C, 4*C)                 (768, 3072)
+                          c_proj = Linear(4*C, C)               (3072, 768)
+
+BLOCK REPETITION
+n_layer = 12              for block in self.transformer.h:       12 × Block
+                          ↑ shape (B, T, 768) preserved every block
+
+SLIDING WINDOW
+window_pattern = "SSSL"   Layer 0: attend to 512 tokens back    (B, 6, T, 512)
+sequence_len = 2048       Layer 3: attend to 2048 tokens back   (B, 6, T, 2048)
+                          ↑ S = quarter context, L = full context
+
+ROTARY EMBEDDINGS
+sequence_len = 2048       cos, sin precomputed                  (1, 2048, 1, 64)
+n_embd // n_head = 128    ↑ half of head_dim (rotation pairs)
+```
+
+> [!keyinsight] Two config values determine almost everything
+> `n_embd` (768) controls the **width** — it appears in every Linear layer, every shape trace.
+> `n_layer` (12) controls the **depth** — how many times the block repeats.
+> Everything else is either derived from these two (`head_dim = n_embd // n_head`) or controls a specific feature (`window_pattern`, `n_kv_head`).
+
+---
+
 ## Versus your earlier notes
 
 | Your notes (nanoGPT) | nanochat | What changed |

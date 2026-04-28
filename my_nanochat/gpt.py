@@ -261,13 +261,122 @@ class GPT(nn.Module):
             char = pattern[layer_idx % len(pattern)]
             window_sizes.append(char_to_window[char])
 
-        window_sizes[-1] = (long_window, 0)  # This must be already calculated. Just reconfirming I think
+        window_sizes[-1] = (long_window, 0)  # This must be already be true due to 'SSSL'. Just reconfirming I think
         return window_sizes
 
+    def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+        B, T = idx.size()
+        T0 = 0 if kv_cache is None else kv_cache.get_pos()
+        cos_sin = self.cos[:, T0:T0 + T], self.sin[:, T0:T0 + T]
 
-    def forward (self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
-        B,T=idx.size()
-        T0= 0 if kv_cache is None else kv_cache.get_pos()
-        cos_sin = self.cos[,:T0:T0+T], self.sin[:, T0:T0+T]
+        # idx = B, T
+        x = self.transformer.wte(idx)  # B,T,768
+        x = x.to(COMPUTE_DTYPE)
+        x = norm(x)  # B,T,768
 
+        # Training
+        if kv_cache is None:
+            gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))  # Take first 24 channels of position 1+
+            x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+        else:
+            x_pre_smear = kv_cache.prev_embedding
+            kv_cache.prev_embedding = x[:, -1:, :]
+            if T > 1:
+                gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
+                # concated first token's value with the smeared values for the rest of the tokens
+                x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+            elif x_pre_smear is not None:
+                gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, :, :24]))
+                x = x + gate * x_pre_smear
 
+        x0 = x
+        n_layer = self.config.n_layer
+        backout_layer = n_layer // 2  # Skip the lower level layers since they have already served their purpose.
+        x_backout = None
+
+        for i, block in enumerate(self.transformer.h):
+            # resid_lambdas are an enhancement over the original transformer paper. x0 holds the original embedding. Smearing and carry over all over the place !
+            x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+            ve = self.value_embeds[str(i)](idx).to(x.dtype) if str(i) in self.value_embeds else None
+            x = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
+            if i == backout_layer:
+                x_backout = x
+        if x_backout is not None:
+            x = x - self.backout_lambda.to(x.dtype) * x_backout
+        x = norm(x)
+
+        softcap = 15  # the goal is for logits to be between -15 and +15 by running the raw logits through tanh at fp 32 and then multiplying them by 15
+        logits = self.lm_head(x)
+        logits = logits[..., :self.config.vocab_size]
+        logits = logits.float()
+        logits = softcap * torch.tanh(logits / softcap)
+
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction=loss_reduction)
+            return loss
+        else:
+            return logits
+
+    def setup_optimizer(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0, scalar_lr=0.5):
+        model_dim = self.config.n_embd
+        ddp, rank, local_rank, world_size = get_dist_info()
+
+        matrix_params = list(self.transformer.h.parameters())
+        value_embeds_params = list(self.value_embeds.parameters())
+        embedding_params = list(self.transformer.wte.parameters())
+        lm_head_params = list(self.lm_head.parameters())
+        resid_params = [self.resid_lambdas]
+        x0_params = [self.x0_lambdas]
+        smear_params = [self.smear_gate.weight, self.smear_lambda, self.backout_lambda]
+
+        dmodel_lr_scale = (model_dim / 768) ** -0.5
+
+        param_groups = [
+            dict(kind='adamw', params=lm_head_params, lr=unembedding_lr * dmodel_lr_scale, betas=(0.8, 0.96), eps=1e-10, weight_decay=0.01),
+            dict(kind='adamw', params=embedding_params, lr=embedding_lr * dmodel_lr_scale, betas=(0.8, 0.995), eps=1e-10, weight_decay=0.001),
+            dict(kind='adamw', params=value_embeds_params, lr=embedding_lr * dmodel_lr_scale * 0.5, betas=(0.8, 0.995), eps=1e-10, weight_decay=0.01),
+            dict(kind='adamw', params=resid_params, lr=scalar_lr * 0.01, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.05),
+            dict(kind='adamw', params=x0_params, lr=scalar_lr, betas=(0.96, 0.95), eps=1e-10, weight_decay=0.0),
+            dict(kind='adamw', params=smear_params, lr=0.2, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0),
+        ]
+
+        for shape in sorted({p.shape for p in matrix_params}):
+            group_params = [p for p in matrix_params if p.shape == shape]
+            param_groups.append(
+                dict(kind='muon', params=group_params, lr=matrix_lr, momentum=0.95, ns_steps=5, beta2=0.9, weight_decay=weight_decay, ))
+
+        Factory = DistMuonAdamW if ddp else MuonAdamW
+        optimizer = Factory(param_groups)
+        for group in optimizer.param_groups:
+            group["initial_lr"] = group["lr"]
+        return optimizer
+
+    @torch.inference_mode()
+    def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
+        device = self.get_device()
+        rng = None
+
+        if temperature > 0:
+            rng = torch.Generator(device=device)
+            rng.manual_seed(seed)
+
+        ids = torch.tensor([tokens], dtype=torch.long, device=device)  # 1,T
+
+        for _ in range(max_tokens):
+            logits = self.forward(ids)  # 1,T,V
+            logits = logits[:, -1, :]  # last position alone # 1,V
+
+            if top_k is not None and top_k > 0:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf')
+
+            if temperature > 0:
+                logits = logits / temperature # Logit amplification or shrinking based on temperature
+                probs = F.softmax(logits, dim=-1)
+                next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+            else:
+                next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+
+            ids = torch.cat((ids, next_ids), dim=1)
+            token = next_ids.item()
+            yield token

@@ -142,12 +142,12 @@ class Block(nn.Module):
         return x
 
 
-class GPT (nn.Module):
+class GPT(nn.Module):
     def __init__(self, config, pad_vocab_size_to=64):
         super().__init__()
-        self.config=config
+        self.config = config
         self.window_sizes = self._compute_window_sizes(config)
-        padded_vocab_size=((config.vocab_size+pad_vocab_size_to-1) // pad_vocab_size_to) * pad_vocab_size_to
+        padded_vocab_size = ((config.vocab_size + pad_vocab_size_to - 1) // pad_vocab_size_to) * pad_vocab_size_to
 
         # Basically,
         # 1. convert vocab to embedding using wte (32768,768)
@@ -155,30 +155,30 @@ class GPT (nn.Module):
         # 3. convert embedding to vocab using lm_head (768,32768)
         self.transformer = nn.ModuleDict({
             "wte": nn.Embedding(padded_vocab_size, config.n_embd),
-            "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)]) #Construct all hidden layers/transformer blocks
+            "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)])  # Construct all hidden layers/transformer blocks
         })
-        self.lm_head=Linear(config.n_embd, padded_vocab_size, bias=False)
+        self.lm_head = Linear(config.n_embd, padded_vocab_size, bias=False)
 
         # # Research: This is interesting. Scales the accumulated residual. Controls how much does the residual carry across layers
         self.resid_lambdas = nn.Parameter(torch.ones(config.n_layer))
         # Research: Same as above but this is for embedding. How much does the original embedding carry through the layers.
-        self.x0_lambdas=nn.Parameter(torch.zeros(config.n_layer))
+        self.x0_lambdas = nn.Parameter(torch.zeros(config.n_layer))
 
         # Research: Mix previous token embedding into current token. Like a bigram? Reads first 24 channels of the input
-        self.smear_gate=Linear(24,1,bias=False)
+        self.smear_gate = Linear(24, 1, bias=False)
         self.smear_lambda = nn.Parameter(torch.zeros(1))
 
         # Research. No freaking idea
-        self.backout_lambda=nn.Parameter(0.2 * torch.ones(1))
+        self.backout_lambda = nn.Parameter(0.2 * torch.ones(1))
 
-        head_dim = config.n_embd // config.n_head # 768/6=128
-        kv_dim = config.n_kv_head * head_dim # 768
+        head_dim = config.n_embd // config.n_head  # 768/6=128
+        kv_dim = config.n_kv_head * head_dim  # 768
         self.value_embeds = nn.ModuleDict({
-            str(i): nn.Embedding(padded_vocab_size, kv_dim) # 32768,768
-            for i in range(config.n_layer) if has_ve(i, config.n_layer) #only for half the layers
-        }) # Each alternating layer has 32768*768
+            str(i): nn.Embedding(padded_vocab_size, kv_dim)  # 32768,768
+            for i in range(config.n_layer) if has_ve(i, config.n_layer)  # only for half the layers
+        })  # Each alternating layer has 32768*768
 
-        #Research - no idea how the math works
+        # Research - no idea how the math works
         self.rotary_seq_len = config.sequence_len * 10
         head_dim = config.n_embd // config.n_head
         cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
@@ -189,22 +189,23 @@ class GPT (nn.Module):
     def init_weights(self):
         torch.nn.init.normal_(self.transformer.wte.weight, mean=0.0, std=0.8)
         torch.nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.001)
-        n_embd=self.config.n_embd
-        s=3**0.5 * n_embd**-0.5 #-0.0625 to +0.0625 for all attn tensors
+        n_embd = self.config.n_embd
+        s = 3 ** 0.5 * n_embd ** -0.5  # -0.0625 to +0.0625 for all attn tensors
 
         for block in self.transformer.h:
             torch.nn.init.uniform_(block.attn.c_q.weight, -s, s)
             torch.nn.init.uniform_(block.attn.c_k.weight, -s, s)
             torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
             torch.nn.init.zeros_(block.attn.c_proj.weight)
-            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s*0.4, s*0.4) #magic constants, magic constants everywhere !
+            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s * 0.4, s * 0.4)  # magic constants, magic constants everywhere !
             torch.nn.init.zeros_(block.mlp.c_proj.weight)
 
         n_layer = self.config.n_layer
         for i in range(n_layer):
-            self.resid_lambdas.data[i] = 1.15 - (0.10 * i / max(n_layer -1, 1)) # Apparently this goes from 1.15 to 1.05
+            self.resid_lambdas.data[i] = 1.15 - (0.10 * i / max(n_layer - 1, 1))  # Apparently this goes from 1.15 to 1.05
         for i in range(n_layer):
-            self.x0_lambdas.data[i] = 0.20-(0.15*i/max(n_layer-1, 1)) # This one goes from 0.20 to 0.05 - No idea why these specific constants
+            self.x0_lambdas.data[i] = 0.20 - (
+                    0.15 * i / max(n_layer - 1, 1))  # This one goes from 0.20 to 0.05 - No idea why these specific constants
 
         torch.nn.init.zeros_(self.smear_lambda)
         torch.nn.init.constant_(self.backout_lambda, 0.2)
@@ -218,7 +219,7 @@ class GPT (nn.Module):
                 torch.nn.init.uniform_(block.attn.ve_gate.weight, 0.0, 0.02)
 
         head_dim = self.config.n_embd // self.config.n_head
-        cos,sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
         self.cos, self.sin = cos, sin
 
         if COMPUTE_DTYPE != torch.float16:
@@ -226,13 +227,47 @@ class GPT (nn.Module):
             for ve in self.value_embeds.values():
                 ve.to(dtype=COMPUTE_DTYPE)
 
+    # Research. A LOT. Very little idea on what this does. I get that for positions 1..128, we are rotating by a number.
+    # The proximity of the token gets a bigger value - the 1/ 100000^0/128 =1.0 for the first token and progressively smaller as the distance is higher
+    def _precompute_rotary_embeddings(self, seq_len, head_dim, base=100000, device=None):
+        if device is None:
+            device = self.transformer.wte.weight.device
+
+        channel_range = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
+        inv_freq = 1.0 / (base ** (channel_range / head_dim))
+
+        t = torch.arange(seq_len, dtype=torch.float32, device=device)
+
+        freqs = torch.outer(t, inv_freq)
+        cos, sin = freqs.cos(), freqs.sin()
+        cos, sin = cos.to(COMPUTE_DTYPE), sin.to(COMPUTE_DTYPE)
+        # WTF. Why?
+        cos, sin = cos[None, :, None, :], sin[None, :, None, :]
+        return cos, sin
+
+    def _compute_window_sizes(self, config):
+        pattern = config.window_pattern.upper()
+
+        long_window = config.sequence_len  # 2048
+        short_window = -(-long_window // 4 // 128) * 128  # 512
+
+        char_to_window = {
+            "L": (long_window, 0),
+            "S": (short_window, 0)
+        }
+
+        window_sizes = []
+        for layer_idx in range(config.n_layer):
+            char = pattern[layer_idx % len(pattern)]
+            window_sizes.append(char_to_window[char])
+
+        window_sizes[-1] = (long_window, 0)  # This must be already calculated. Just reconfirming I think
+        return window_sizes
 
 
-
-
-
-
-
-
+    def forward (self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+        B,T=idx.size()
+        T0= 0 if kv_cache is None else kv_cache.get_pos()
+        cos_sin = self.cos[,:T0:T0+T], self.sin[:, T0:T0+T]
 
 

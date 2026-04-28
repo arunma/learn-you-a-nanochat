@@ -185,6 +185,54 @@ class GPT (nn.Module):
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
 
+    @torch.no_grad()
+    def init_weights(self):
+        torch.nn.init.normal_(self.transformer.wte.weight, mean=0.0, std=0.8)
+        torch.nn.init.normal_(self.lm_head.weight, mean=0.0, std=0.001)
+        n_embd=self.config.n_embd
+        s=3**0.5 * n_embd**-0.5 #-0.0625 to +0.0625 for all attn tensors
+
+        for block in self.transformer.h:
+            torch.nn.init.uniform_(block.attn.c_q.weight, -s, s)
+            torch.nn.init.uniform_(block.attn.c_k.weight, -s, s)
+            torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
+            torch.nn.init.zeros_(block.attn.c_proj.weight)
+            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s*0.4, s*0.4) #magic constants, magic constants everywhere !
+            torch.nn.init.zeros_(block.mlp.c_proj.weight)
+
+        n_layer = self.config.n_layer
+        for i in range(n_layer):
+            self.resid_lambdas.data[i] = 1.15 - (0.10 * i / max(n_layer -1, 1)) # Apparently this goes from 1.15 to 1.05
+        for i in range(n_layer):
+            self.x0_lambdas.data[i] = 0.20-(0.15*i/max(n_layer-1, 1)) # This one goes from 0.20 to 0.05 - No idea why these specific constants
+
+        torch.nn.init.zeros_(self.smear_lambda)
+        torch.nn.init.constant_(self.backout_lambda, 0.2)
+        torch.nn.init.uniform_(self.smear_gate.weight, 0.0, 0.02)
+
+        for ve in self.value_embeds.values():
+            torch.nn.init.uniform_(ve.weight, -s, s)
+
+        for block in self.transformer.h:
+            if block.attn.ve_gate is not None:
+                torch.nn.init.uniform_(block.attn.ve_gate.weight, 0.0, 0.02)
+
+        head_dim = self.config.n_embd // self.config.n_head
+        cos,sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        self.cos, self.sin = cos, sin
+
+        if COMPUTE_DTYPE != torch.float16:
+            self.transformer.wte.to(dtype=COMPUTE_DTYPE)
+            for ve in self.value_embeds.values():
+                ve.to(dtype=COMPUTE_DTYPE)
+
+
+
+
+
+
+
+
 
 
 

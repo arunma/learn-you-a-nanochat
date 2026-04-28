@@ -140,3 +140,51 @@ class Block(nn.Module):
         x = x + self.attn(norm(x), ve, cos_sin, window_size, kv_cache)
         x = x + self.mlp(norm(x))
         return x
+
+
+class GPT (nn.Module):
+    def __init__(self, config, pad_vocab_size_to=64):
+        super().__init__()
+        self.config=config
+        self.window_sizes = self._compute_window_sizes(config)
+        padded_vocab_size=((config.vocab_size+pad_vocab_size_to-1) // pad_vocab_size_to) * pad_vocab_size_to
+
+        # Basically,
+        # 1. convert vocab to embedding using wte (32768,768)
+        # 2. Do all the processing with h - 12 * Block that operates on B,T,768
+        # 3. convert embedding to vocab using lm_head (768,32768)
+        self.transformer = nn.ModuleDict({
+            "wte": nn.Embedding(padded_vocab_size, config.n_embd),
+            "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)]) #Construct all hidden layers/transformer blocks
+        })
+        self.lm_head=Linear(config.n_embd, padded_vocab_size, bias=False)
+
+        # # Research: This is interesting. Scales the accumulated residual. Controls how much does the residual carry across layers
+        self.resid_lambdas = nn.Parameter(torch.ones(config.n_layer))
+        # Research: Same as above but this is for embedding. How much does the original embedding carry through the layers.
+        self.x0_lambdas=nn.Parameter(torch.zeros(config.n_layer))
+
+        # Research: Mix previous token embedding into current token. Like a bigram? Reads first 24 channels of the input
+        self.smear_gate=Linear(24,1,bias=False)
+        self.smear_lambda = nn.Parameter(torch.zeros(1))
+
+        # Research. No freaking idea
+        self.backout_lambda=nn.Parameter(0.2 * torch.ones(1))
+
+        head_dim = config.n_embd // config.n_head # 768/6=128
+        kv_dim = config.n_kv_head * head_dim # 768
+        self.value_embeds = nn.ModuleDict({
+            str(i): nn.Embedding(padded_vocab_size, kv_dim) # 32768,768
+            for i in range(config.n_layer) if has_ve(i, config.n_layer) #only for half the layers
+        }) # Each alternating layer has 32768*768
+
+        #Research - no idea how the math works
+        self.rotary_seq_len = config.sequence_len * 10
+        head_dim = config.n_embd // config.n_head
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+
+
+
+

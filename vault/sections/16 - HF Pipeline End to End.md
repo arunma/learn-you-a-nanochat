@@ -181,6 +181,47 @@ The cost of training is determined by one formula:
 Total FLOPs ≈ 6 × params × tokens
 ```
 
+### Where does the 6× come from?
+
+Every weight parameter in the model participates in a matrix multiply (`y = x @ W`). For each token passing through that matmul:
+
+```
+FORWARD PASS:
+  y = x @ W
+  Each output element = dot product of a row of x with a column of W
+  One multiply + one add = 2 FLOPs per parameter
+                                                          2 FLOPs
+
+BACKWARD PASS — gradient for W (to update the weights):
+  dW = x.T @ dy
+  Same shape matmul, same cost
+                                                          2 FLOPs
+
+BACKWARD PASS — gradient for x (to propagate to previous layer):
+  dx = dy @ W.T
+  Same shape matmul, same cost
+                                                          2 FLOPs
+
+TOTAL PER PARAMETER PER TOKEN:                            6 FLOPs
+```
+
+So for a 300M-parameter model processing one token:
+```
+6 × 300,000,000 = 1,800,000,000 FLOPs = 1.8 GFLOPs per token
+```
+
+For 10 billion tokens:
+```
+1.8 GFLOPs × 10,000,000,000 tokens = 18,000,000,000,000,000,000 FLOPs
+                                    = 18 × 10^18
+                                    = 18 exaFLOPs
+```
+
+> [!keyinsight] The 6× rule is remarkably accurate
+> This approximation (from the PaLM and Chinchilla papers) is within ~1% of the true compute for transformer models. It ignores softmax, layer norm, and embedding lookups — but those are <1% of total FLOPs. The matmuls dominate everything.
+>
+> Reference: Karpathy includes this formula in `GPT.estimate_flops()` in nanochat/gpt.py (line 317), citing the same derivation.
+
 | | Value | Source |
 |-|-------|--------|
 | params | 300M | Your model size |

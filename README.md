@@ -2,6 +2,8 @@
 
 A hands-on tutorial for learning LLM internals through **copywork** — reading, understanding, and rewriting [Karpathy's nanochat](https://github.com/karpathy/nanochat) from memory.
 
+> **Companion repo:** [`learn-you-an-hf-llm`](https://github.com/arunma/learn-you-an-hf-llm) — same architecture wrapped in Hugging Face Transformers (`PreTrainedModel`, `tokenizers`, Hub-loadable) instead of plain PyTorch. Either repo is self-contained; together they show the same model from both ends.
+
 ## What is this?
 
 This repo contains:

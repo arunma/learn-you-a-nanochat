@@ -85,22 +85,15 @@ Your code goes in `vault/copywork/`. Read a section → close it → write the c
 
 ---
 
-## Track 2 — Hugging Face Pipeline
+## Pipeline and Scaling
 
-Copywork goes in `vault/copywork/hf/`. Same method: read → close → write from memory.
-
-### HF Copywork Sections
-- [[HF-01 - Data and Tokenizer]] — Download WikiText, train BPE, tokenize corpus
-- [[HF-02 - Model and Training]] — LlamaConfig, LlamaForCausalLM, training loop
-- [[HF-03 - Evaluate Generate Save]] — Perplexity, model.generate(), save/load/Hub
-
-### HF Reference
-- [[HF-04 - Deep Dive Internals]] — Every nanochat component mapped to HF equivalent (constraints, wrapping, tradeoffs)
-
-### Pipeline and Scaling
 - [[13 - Speedrun Walkthrough]] — nanochat's end-to-end training pipeline on 8×H100
-- [[15 - Build Your Own LLM]] — Complete 9-stage guide with open source tools
-- [[16 - HF Pipeline End to End]] — Working pipeline with cost analysis and 6× FLOPs derivation
+
+---
+
+## Companion repo — Hugging Face track
+
+The Hugging Face wrapping of this same architecture lives in a separate repo: [`learn-you-an-hf-llm`](https://github.com/arunma/learn-you-an-hf-llm). Same model (RoPE, GQA-ready attention, RMSNorm, ReLU² MLP), wrapped in `PreTrainedModel` / `PretrainedConfig` instead of plain `nn.Module`. Read either; together they show the model from both ends.
 
 ---
 
